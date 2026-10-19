@@ -1,3 +1,5 @@
+# SObolsas
+
 # Bolsaria — frontend
 
 Frontend responsivo em React e JavaScript, com CSS puro. A aplicação não inclui servidor, base de dados, autenticação, armazenamento ou processamento de pagamentos.
