@@ -62,9 +62,10 @@ export default function Header() {
     };
   }, [areasOpen, open]);
 
-  const areas = [roles.student, roles.mentor, roles.admin];
+  // A administração é uma área isolada: não aparece na navegação pública.
+  const areas = [roles.student, roles.mentor];
   const currentArea = role ? roles[role] : null;
-  const onArea = pathname.startsWith('/estudante') || pathname.startsWith('/mentor') || pathname.startsWith('/admin');
+  const onArea = pathname.startsWith('/estudante') || pathname.startsWith('/mentor/') || pathname === '/mentor';
 
   return (
     <header className="site-header" ref={headerRef}>

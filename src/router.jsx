@@ -27,6 +27,7 @@ export const routes = [
   { path: '/mentor/rendimentos', title: 'Rendimentos', key: 'mentor-earnings' },
   { path: '/agendar', title: 'Agendamento', key: 'booking' },
   { path: '/checkout', title: 'Checkout', key: 'checkout' },
+  { path: '/admin/entrar', title: 'Acesso à administração', key: 'admin-login' },
   { path: '/admin', title: 'Painel administrativo', key: 'admin-home' },
   { path: '/admin/bolsas', title: 'Gestão de bolsas', key: 'admin-scholarships' },
   { path: '/admin/utilizadores', title: 'Gestão de utilizadores', key: 'admin-users' },
@@ -35,6 +36,9 @@ export const routes = [
 ];
 
 const RouterContext = createContext(null);
+
+// Tudo o que está em /admin é uma área isolada: layout próprio e acesso protegido (exceto /admin/entrar).
+export const isAdminPath = (pathname) => pathname === '/admin' || pathname.startsWith('/admin/');
 
 export function matchRoute(pathname) {
   const pathSegments = pathname.split('/').filter(Boolean);

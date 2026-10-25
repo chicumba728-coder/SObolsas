@@ -1,47 +1,121 @@
-import React from 'react';
-import { Link } from '../router.jsx';
-import { DemoNote, EmptyState, PageHeading, SectionCard } from '../components/ui.jsx';
+import React, { useState } from 'react';
+import { Link, useRouter } from '../router.jsx';
+import { DemoNote, EmptyState, Field, Notice, PageHeading, SectionCard, SelectField, TextAreaField } from '../components/ui.jsx';
 import { ArrowLeft, Lock } from '../components/icons.jsx';
-import { emptyData } from '../data/emptyData.js';
+import { addRecord, useCollection } from '../data/store.js';
+import { formatDate, todayISO } from '../data/status.js';
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function BookingPage() {
-  const hasServices = emptyData.services.length > 0;
+  const { search } = useRouter();
+  const mentors = useCollection('mentors').filter((m) => m.status === 'approved');
+  const bookings = useCollection('bookings');
+  const presetMentor = new URLSearchParams(search).get('mentor') || '';
+  const [values, setValues] = useState({
+    mentorId: '', date: '', time: '', studentName: '', studentEmail: '', topic: '',
+  });
+  const [errors, setErrors] = useState({});
+  const [done, setDone] = useState(null);
+
+  // Pré-seleciona o mentor vindo do perfil (?mentor=ID), se continuar aprovado.
+  const mentorId = values.mentorId || (mentors.some((m) => m.id === presetMentor) ? presetMentor : '');
+
+  const setValue = (field) => (event) => {
+    setValues((prev) => ({ ...prev, [field]: event.target.value }));
+    setErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
+  };
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    const clean = {
+      mentorId,
+      date: values.date,
+      time: values.time,
+      studentName: values.studentName.trim(),
+      studentEmail: values.studentEmail.trim(),
+      topic: values.topic.trim(),
+    };
+    const next = {};
+    if (!clean.mentorId) next.mentorId = 'Escolha um mentor.';
+    if (!clean.date) next.date = 'Escolha a data.';
+    else if (clean.date < todayISO()) next.date = 'A data não pode estar no passado.';
+    if (!clean.time) next.time = 'Escolha o horário.';
+    if (!clean.studentName) next.studentName = 'Indique o seu nome.';
+    if (!clean.studentEmail) next.studentEmail = 'Indique o endereço de email.';
+    else if (!EMAIL_RE.test(clean.studentEmail)) next.studentEmail = 'Introduza um endereço de email válido.';
+    if (!next.time && !next.date && clean.mentorId) {
+      const clash = bookings.some((b) => b.mentorId === clean.mentorId && b.date === clean.date && b.time === clean.time && b.status !== 'cancelled');
+      if (clash) next.time = 'Este horário já tem um pedido. Escolha outro.';
+    }
+    setErrors(next);
+    const order = ['mentorId', 'date', 'time', 'studentName', 'studentEmail'];
+    const first = order.find((field) => next[field]);
+    if (first) { document.getElementById(`booking-${first}`)?.focus(); return; }
+
+    const mentor = mentors.find((m) => m.id === clean.mentorId);
+    addRecord('bookings', { ...clean, mentorName: mentor?.name || '', status: 'pending', source: 'public' });
+    setDone({ mentorName: mentor?.name || '', date: clean.date, time: clean.time });
+  };
+
+  if (done) {
+    return (
+      <div className="content-wrap content-wrap--narrow page-content">
+        <PageHeading title="Pedido registado" />
+        <Notice tone="success" title="Pedido de sessão registado">
+          Sessão com {done.mentorName} em {formatDate(done.date)} às {done.time}. Fica pendente até a administração a confirmar.
+          Nesta versão não é enviado email nem cobrado qualquer valor.
+        </Notice>
+        <div className="detail-actions">
+          <button className="button button--outline" type="button" onClick={() => { setDone(null); setValues({ mentorId: '', date: '', time: '', studentName: '', studentEmail: '', topic: '' }); }}>Fazer outro pedido</button>
+          <Link className="button button--primary" to="/mentores">Voltar aos mentores</Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="content-wrap content-wrap--narrow page-content">
-      <PageHeading title="Agendamento" description="Escolha um serviço e um horário para marcar uma sessão de mentoria." />
-      <SectionCard title="Selecionar sessão" description="Os serviços e horários ficam disponíveis quando a ligação estiver ativa.">
-        <DemoNote>O agendamento ainda não está ligado a serviços nem a calendários. Nenhuma reserva é criada.</DemoNote>
-        <fieldset className="form-group">
-          <legend>Detalhes da sessão</legend>
-          <div className="form-grid form-grid--three">
-            <div className="form-field">
-              <label htmlFor="booking-service">Serviço</label>
-              <select id="booking-service" name="servico" disabled>
-                <option>Sem serviços disponíveis</option>
-              </select>
-            </div>
-            <div className="form-field">
-              <label htmlFor="booking-date">Data</label>
-              <input id="booking-date" name="data" type="date" disabled />
-            </div>
-            <div className="form-field">
-              <label htmlFor="booking-time">Horário</label>
-              <select id="booking-time" name="horario" disabled>
-                <option>Sem horários disponíveis</option>
-              </select>
-            </div>
-          </div>
-        </fieldset>
-        {!hasServices && (
+      <PageHeading title="Agendamento" description="Escolha um mentor, uma data e um horário para pedir uma sessão de mentoria." />
+      <SectionCard title="Pedir sessão" description="O pedido fica pendente até ser confirmado pela administração.">
+        {mentors.length === 0 ? (
           <EmptyState
             compact
-            title="Sem serviços disponíveis"
-            description="Assim que existirem serviços publicados, poderá escolher um serviço, uma data e um horário."
+            title="Ainda não há mentores disponíveis"
+            description="Assim que existirem mentores aprovados, poderá escolher um mentor, uma data e um horário."
           />
+        ) : (
+          <form className="profile-form" onSubmit={handleSubmit} noValidate>
+            <fieldset className="form-group">
+              <legend>Detalhes da sessão</legend>
+              <div className="form-grid form-grid--three">
+                <SelectField
+                  id="booking-mentorId"
+                  label="Mentor"
+                  required
+                  placeholder="Escolha um mentor"
+                  options={mentors.map((m) => ({ value: m.id, label: m.specialty ? `${m.name} — ${m.specialty}` : m.name }))}
+                  value={mentorId}
+                  onChange={setValue('mentorId')}
+                  error={errors.mentorId}
+                />
+                <Field id="booking-date" label="Data" type="date" required min={todayISO()} value={values.date} onChange={setValue('date')} error={errors.date} />
+                <Field id="booking-time" label="Horário" type="time" required value={values.time} onChange={setValue('time')} error={errors.time} />
+              </div>
+            </fieldset>
+            <fieldset className="form-group">
+              <legend>Os seus dados</legend>
+              <div className="form-grid">
+                <Field id="booking-studentName" label="Nome" required autoComplete="name" value={values.studentName} onChange={setValue('studentName')} error={errors.studentName} />
+                <Field id="booking-studentEmail" label="Endereço de email" type="email" required autoComplete="email" value={values.studentEmail} onChange={setValue('studentEmail')} error={errors.studentEmail} />
+                <TextAreaField className="form-field--full" id="booking-topic" label="Assunto (opcional)" rows="3" value={values.topic} onChange={setValue('topic')} />
+              </div>
+            </fieldset>
+            <div className="form-actions">
+              <button className="button button--primary" type="submit">Enviar pedido</button>
+            </div>
+          </form>
         )}
-        <div className="form-actions">
-          <button className="button button--primary" type="button" disabled>Continuar para checkout</button>
-        </div>
       </SectionCard>
       <div className="page-footer">
         <Link className="text-link" to="/mentores"><ArrowLeft size={15} /> Voltar aos mentores</Link>
