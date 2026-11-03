@@ -1,43 +1,63 @@
-import React, { createContext, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { api } from './data/api.js';
+import { invalidateAll } from './data/store.js';
 
-// Sessão simulada por papel, guardada em sessionStorage (sobrevive a recargas, termina ao fechar o separador).
-// Não autentica utilizadores reais. A entrada da administração exige o código de src/config/admin.js.
+// Sessão real: autenticação no servidor, com cookie httpOnly. Aqui só se guarda o estado em memória.
 export const roles = {
   student: { key: 'student', label: 'Estudante', area: '/estudante' },
   mentor: { key: 'mentor', label: 'Mentor', area: '/mentor' },
   admin: { key: 'admin', label: 'Administração', area: '/admin' },
 };
 
-const SESSION_KEY = 'bolsaria:role';
 const SessionContext = createContext(null);
 
-function readRole() {
-  try {
-    const stored = window.sessionStorage.getItem(SESSION_KEY);
-    return roles[stored] ? stored : null;
-  } catch { return null; }
-}
-
-function writeRole(role) {
-  try {
-    if (role) window.sessionStorage.setItem(SESSION_KEY, role);
-    else window.sessionStorage.removeItem(SESSION_KEY);
-  } catch { /* armazenamento indisponível */ }
+// Quem pode entrar em cada área. A área do mentor também abre a estudantes que se candidataram a mentor.
+export function canAccess(area, user, mentor) {
+  if (!user) return false;
+  if (area === 'student') return user.role === 'student';
+  if (area === 'mentor') return user.role === 'mentor' || Boolean(mentor);
+  if (area === 'admin') return user.role === 'admin';
+  return false;
 }
 
 export function SessionProvider({ children }) {
-  const [role, setRole] = useState(readRole);
+  const [state, setState] = useState({ user: null, mentor: null, loading: true });
+
+  const apply = useCallback((payload) => {
+    setState({ user: payload?.user || null, mentor: payload?.mentor || null, loading: false });
+    invalidateAll();
+  }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      apply(await api('GET', '/auth/me'));
+    } catch {
+      setState((prev) => ({ ...prev, loading: false }));
+    }
+  }, [apply]);
+
+  useEffect(() => { refresh(); }, [refresh]);
 
   const value = useMemo(() => ({
-    role,
-    isRole: (expected) => role === expected,
-    signIn: (nextRole) => {
-      const next = roles[nextRole] ? nextRole : null;
-      writeRole(next);
-      setRole(next);
+    ...state,
+    role: state.user?.role || null,
+    canAccess: (area) => canAccess(area, state.user, state.mentor),
+    refresh,
+    signIn: async (email, password) => {
+      const payload = await api('POST', '/auth/login', { email, password });
+      apply(payload);
+      return payload;
     },
-    signOut: () => { writeRole(null); setRole(null); },
-  }), [role]);
+    register: async (data) => {
+      const payload = await api('POST', '/auth/register', data);
+      apply(payload);
+      return payload;
+    },
+    signOut: async () => {
+      try { await api('POST', '/auth/logout'); } catch { /* sessão já terminada */ }
+      apply(null);
+    },
+  }), [state, refresh, apply]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
@@ -46,4 +66,10 @@ export function useSession() {
   const context = useContext(SessionContext);
   if (!context) throw new Error('useSession deve ser utilizado dentro de SessionProvider.');
   return context;
+}
+
+// Área principal de um utilizador autenticado.
+export function homeFor(user) {
+  if (!user) return '/entrar';
+  return roles[user.role]?.area || '/';
 }

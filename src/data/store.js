@@ -1,98 +1,84 @@
-import { useSyncExternalStore } from 'react';
-import { emptyData } from './emptyData.js';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { api } from './api.js';
 
-// Camada de dados local do MVP.
-// Guarda as coleções no localStorage do navegador (sem backend). Começa SEMPRE vazia:
-// não existem dados de exemplo. É o único ponto a substituir quando houver API/base de dados;
-// as páginas usam apenas useCollection / addRecord / updateRecord / removeRecord.
-const STORAGE_KEY = 'bolsaria:data:v1';
-const listeners = new Set();
-let cache = null;
+// Camada de dados ligada à API.
+// - useResource(path): lê um recurso (GET) com cache partilhada e estados de carregamento/erro.
+// - mutate(method, path, body): altera dados e volta a carregar os recursos em uso.
+// As páginas não conhecem fetch nem URLs completos: só caminhos da API (/scholarships, /me/saved, ...).
 
-function emptyState() {
-  const base = {};
-  Object.keys(emptyData).forEach((key) => { base[key] = []; });
-  return base;
+const cache = new Map(); // path -> { data, error, loading, promise }
+const listeners = new Map(); // path -> Set<listener>
+const IDLE = Object.freeze({ data: undefined, error: null, loading: true });
+
+function emit(path) {
+  listeners.get(path)?.forEach((listener) => listener());
 }
 
-function load() {
-  const state = emptyState();
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      Object.keys(state).forEach((key) => {
-        if (Array.isArray(parsed?.[key])) state[key] = parsed[key];
-      });
-    }
-  } catch { /* armazenamento indisponível ou corrompido: arranca vazio */ }
-  return state;
+function load(path) {
+  const current = cache.get(path);
+  if (current?.promise) return current.promise;
+  const promise = api('GET', path)
+    .then((data) => { cache.set(path, { data, error: null, loading: false }); })
+    .catch((error) => { cache.set(path, { data: current?.data, error, loading: false }); })
+    .finally(() => emit(path));
+  cache.set(path, { ...(current || IDLE), loading: true, promise });
+  emit(path);
+  return promise;
 }
 
-function getState() {
-  if (!cache) cache = load();
-  return cache;
-}
-
-function emit() {
-  listeners.forEach((listener) => listener());
-}
-
-function commit(next) {
-  cache = next;
-  try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch { /* mantém só em memória */ }
-  emit();
-}
-
-function subscribe(listener) {
-  listeners.add(listener);
-  const onStorage = (event) => {
-    if (event.key === STORAGE_KEY || event.key === null) { cache = null; emit(); }
-  };
-  window.addEventListener('storage', onStorage);
+function subscribe(path, listener) {
+  if (!listeners.has(path)) listeners.set(path, new Set());
+  listeners.get(path).add(listener);
   return () => {
-    listeners.delete(listener);
-    window.removeEventListener('storage', onStorage);
+    const set = listeners.get(path);
+    set.delete(listener);
+    if (!set.size) listeners.delete(path);
   };
 }
 
-function createId() {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+// Volta a pedir todos os recursos com componentes a usá-los e descarta os restantes.
+export function invalidateAll() {
+  for (const path of [...cache.keys()]) {
+    if (listeners.has(path)) {
+      const entry = cache.get(path);
+      cache.set(path, { ...entry, promise: null });
+      load(path);
+    } else {
+      cache.delete(path);
+    }
+  }
 }
 
-export function useCollection(name) {
-  const state = useSyncExternalStore(subscribe, getState, getState);
-  return state[name] || emptyData[name] || [];
+export function useResource(path, { enabled = true } = {}) {
+  const key = enabled && path ? path : null;
+  const snapshot = useSyncExternalStore(
+    useCallback((listener) => (key ? subscribe(key, listener) : () => {}), [key]),
+    () => (key ? cache.get(key) || IDLE : IDLE),
+  );
+
+  useEffect(() => {
+    if (key && !cache.get(key)?.promise && cache.get(key)?.data === undefined && !cache.get(key)?.error) load(key);
+  }, [key]);
+
+  const reload = useCallback(() => {
+    if (!key) return Promise.resolve();
+    const entry = cache.get(key);
+    if (entry) cache.set(key, { ...entry, promise: null });
+    return load(key);
+  }, [key]);
+
+  if (!key) return { data: undefined, error: null, loading: false, reload };
+  return { data: snapshot.data, error: snapshot.error, loading: snapshot.loading && snapshot.data === undefined, reload };
 }
 
-export function useRecord(name, id) {
-  const records = useCollection(name);
-  return records.find((record) => record.id === id) || null;
+// Lista: devolve sempre um array (vazio enquanto carrega).
+export function useList(path, options) {
+  const result = useResource(path, options);
+  return { ...result, items: Array.isArray(result.data) ? result.data : [] };
 }
 
-export function addRecord(name, data) {
-  const state = getState();
-  const record = { ...data, id: createId(), createdAt: new Date().toISOString() };
-  commit({ ...state, [name]: [record, ...(state[name] || [])] });
-  return record;
-}
-
-export function updateRecord(name, id, patch) {
-  const state = getState();
-  commit({
-    ...state,
-    [name]: (state[name] || []).map((record) => (
-      record.id === id ? { ...record, ...patch, updatedAt: new Date().toISOString() } : record
-    )),
-  });
-}
-
-export function removeRecord(name, id) {
-  const state = getState();
-  commit({ ...state, [name]: (state[name] || []).filter((record) => record.id !== id) });
-}
-
-export function resetAllData() {
-  commit(emptyState());
+export async function mutate(method, path, body) {
+  const result = await api(method, path, body);
+  invalidateAll();
+  return result;
 }

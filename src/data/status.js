@@ -18,6 +18,14 @@ export const userStatus = [
 export const userTypes = [
   { value: 'student', label: 'Estudante' },
   { value: 'mentor', label: 'Mentor' },
+  { value: 'admin', label: 'Administração' },
+];
+
+export const applicationStatus = [
+  { value: 'preparing', label: 'Em preparação' },
+  { value: 'submitted', label: 'Submetida' },
+  { value: 'accepted', label: 'Aceite' },
+  { value: 'rejected', label: 'Recusada' },
 ];
 
 export const bookingStatus = [
@@ -25,6 +33,12 @@ export const bookingStatus = [
   { value: 'confirmed', label: 'Confirmada' },
   { value: 'cancelled', label: 'Cancelada' },
 ];
+
+export const statusTones = {
+  published: 'success', approved: 'success', active: 'success', confirmed: 'success', accepted: 'success', submitted: 'success',
+  draft: 'warning', pending: 'warning', preparing: 'warning',
+  suspended: 'muted', cancelled: 'muted', rejected: 'muted',
+};
 
 export const labelOf = (list, value) => list.find((item) => item.value === value)?.label || '—';
 

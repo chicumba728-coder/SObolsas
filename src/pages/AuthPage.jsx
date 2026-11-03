@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Link, useRouter } from '../router.jsx';
-import { DemoNote, Field } from '../components/ui.jsx';
+import { Field, Notice } from '../components/ui.jsx';
 import { Alert, ArrowLeft, ArrowRight, Eye, EyeOff } from '../components/icons.jsx';
-import { useSession } from '../session.jsx';
+import { useSession, homeFor } from '../session.jsx';
+import { api } from '../data/api.js';
 
 const modes = {
   'login-student': {
@@ -30,13 +31,22 @@ const modes = {
     description: 'Indique o email associado à conta para receber as instruções de recuperação.',
     button: 'Pedir recuperação', fields: ['email'],
   },
+  reset: {
+    area: null, title: 'Definir nova palavra-passe',
+    description: 'Escolha uma nova palavra-passe para a sua conta.',
+    button: 'Guardar palavra-passe', fields: ['password', 'confirm'],
+  },
 };
 
 const fieldConfig = {
   name: { label: 'Nome', type: 'text', placeholder: 'O seu nome', autoComplete: 'name' },
   email: { label: 'Endereço de email', type: 'email', placeholder: 'nome@exemplo.pt', autoComplete: 'email' },
   password: { label: 'Palavra-passe', type: 'password', placeholder: 'Introduza a sua palavra-passe' },
+  confirm: { label: 'Confirmar palavra-passe', type: 'password', placeholder: 'Repita a palavra-passe' },
 };
+
+// Só aceita regressos para caminhos internos (evita redirecionamentos para outros sites).
+const safeReturn = (value) => (value && value.startsWith('/') && !value.startsWith('//') ? value : null);
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const isRegister = (mode) => mode.startsWith('register');
@@ -53,17 +63,23 @@ function validate(fields, values) {
     if (!values.password) errors.password = 'Introduza a palavra-passe.';
     else if (values.password.length < 8) errors.password = 'Use pelo menos 8 caracteres.';
   }
+  if (fields.includes('confirm') && values.confirm !== values.password) errors.confirm = 'As palavras-passe não coincidem.';
   return errors;
 }
 
 export default function AuthPage({ mode }) {
   const config = modes[mode];
-  const { navigate } = useRouter();
-  const { signIn } = useSession();
-  const [values, setValues] = useState({ name: '', email: '', password: '' });
+  const { navigate, search } = useRouter();
+  const { signIn, register } = useSession();
+  const [values, setValues] = useState({ name: '', email: '', password: '', confirm: '' });
   const [errors, setErrors] = useState({});
   const [showPassword, setShowPassword] = useState(false);
   const [status, setStatus] = useState('');
+  const [formError, setFormError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const params = new URLSearchParams(search);
+  const returnTo = safeReturn(params.get('voltar'));
+  const resetToken = params.get('token') || '';
 
   if (!config) return null;
 
@@ -72,24 +88,42 @@ export default function AuthPage({ mode }) {
     setErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
   };
 
-  const handleSubmit = (event) => {
-    event.preventDefault();
-    const nextErrors = validate(config.fields, values);
+  const showErrors = (nextErrors) => {
     setErrors(nextErrors);
     const firstError = config.fields.find((field) => nextErrors[field]);
-    if (firstError) {
-      document.getElementById(`auth-${mode}-${firstError}`)?.focus();
-      return;
-    }
+    if (firstError) document.getElementById(`auth-${mode}-${firstError}`)?.focus();
+    return Boolean(firstError);
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (submitting) return;
+    if (showErrors(validate(config.fields, values))) return;
     setStatus('');
-    if (isLogin(mode)) {
-      signIn(config.area);
-      navigate(config.area === 'student' ? '/estudante' : '/mentor');
-      return;
+    setFormError('');
+    setSubmitting(true);
+    const email = values.email.trim();
+    try {
+      if (isLogin(mode)) {
+        const { user } = await signIn(email, values.password);
+        navigate(returnTo || homeFor(user), { replace: true });
+      } else if (isRegister(mode)) {
+        const { user } = await register({ name: values.name.trim(), email, password: values.password, role: config.area });
+        navigate(returnTo || homeFor(user), { replace: true });
+      } else if (mode === 'recovery') {
+        await api('POST', '/auth/recovery', { email });
+        setStatus('Se existir uma conta com este email, enviámos as instruções para definir uma nova palavra-passe. A ligação é válida durante 1 hora.');
+      } else if (mode === 'reset') {
+        await api('POST', '/auth/reset', { token: resetToken, password: values.password });
+        setValues((prev) => ({ ...prev, password: '', confirm: '' }));
+        setStatus('Palavra-passe atualizada. Já pode iniciar sessão com a nova palavra-passe.');
+      }
+    } catch (error) {
+      const fieldErrors = Object.fromEntries(Object.entries(error.fields || {}).filter(([field]) => config.fields.includes(field)));
+      if (!showErrors(fieldErrors)) setFormError(error.message);
+    } finally {
+      setSubmitting(false);
     }
-    setStatus(isRegister(mode)
-      ? 'Demonstração: a conta não é criada. Nenhum pedido é enviado; o registo aguarda a ligação.'
-      : 'Demonstração: nenhum email é enviado. A recuperação aguarda a ligação.');
   };
 
   return (
@@ -101,11 +135,13 @@ export default function AuthPage({ mode }) {
         </span>
         <h1>{config.title}</h1>
         <p className="auth-card__intro">{config.description}</p>
-        <DemoNote>
-          {isLogin(mode)
-            ? 'A entrada não verifica credenciais e serve apenas para abrir a área escolhida.'
-            : 'A autenticação ainda não está ligada. Os dados não são enviados nem guardados.'}
-        </DemoNote>
+        {mode === 'reset' && !resetToken && (
+          <Notice tone="error">A ligação não é válida. Peça uma nova em <Link to="/recuperar-palavra-passe">recuperar palavra-passe</Link>.</Notice>
+        )}
+        {mode === 'register-mentor' && (
+          <Notice>O perfil de mentor só fica público depois de aprovado pela administração.</Notice>
+        )}
+        {formError && <Notice tone="error">{formError}</Notice>}
         <form className="stack-form" onSubmit={handleSubmit} noValidate>
           {config.fields.map((field) => {
             const cfg = fieldConfig[field];
@@ -119,7 +155,7 @@ export default function AuthPage({ mode }) {
               value: values[field],
               onChange: setValue(field),
             };
-            if (field === 'password') {
+            if (field === 'password' || field === 'confirm') {
               return (
                 <div className="form-field" key={field}>
                   <label htmlFor={id}>{cfg.label}<span className="form-field__required" aria-hidden="true">*</span></label>
@@ -130,14 +166,14 @@ export default function AuthPage({ mode }) {
                       type={showPassword ? 'text' : 'password'}
                       required
                       aria-required="true"
-                      autoComplete={isRegister(mode) ? 'new-password' : 'current-password'}
+                      autoComplete={isLogin(mode) ? 'current-password' : 'new-password'}
                       placeholder={cfg.placeholder}
-                      value={values.password}
-                      onChange={setValue('password')}
-                      aria-invalid={errors.password ? 'true' : undefined}
-                      aria-describedby={errors.password ? `${id}-error` : undefined}
+                      value={values[field]}
+                      onChange={setValue(field)}
+                      aria-invalid={errors[field] ? 'true' : undefined}
+                      aria-describedby={errors[field] ? `${id}-error` : undefined}
                     />
-                    <button
+                    {field === 'password' && <button
                       type="button"
                       className="password-field__toggle"
                       onClick={() => setShowPassword((value) => !value)}
@@ -145,19 +181,19 @@ export default function AuthPage({ mode }) {
                       aria-pressed={showPassword}
                     >
                       {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
+                    </button>}
                   </div>
-                  {field === 'password' && isRegister(mode) && !errors.password && (
+                  {field === 'password' && !isLogin(mode) && !errors.password && (
                     <p className="form-field__hint">Use pelo menos 8 caracteres.</p>
                   )}
-                  {errors.password && <p className="form-field__error" id={`${id}-error`}><Alert size={14} />{errors.password}</p>}
+                  {errors[field] && <p className="form-field__error" id={`${id}-error`}><Alert size={14} />{errors[field]}</p>}
                 </div>
               );
             }
             return <Field key={field} {...common} type={cfg.type} autoComplete={cfg.autoComplete} />;
           })}
-          <button className="button button--primary button--wide" type="submit">
-            {config.button} <ArrowRight size={16} />
+          <button className="button button--primary button--wide" type="submit" disabled={submitting || (mode === 'reset' && !resetToken)}>
+            {submitting ? 'Aguarde…' : <>{config.button} <ArrowRight size={16} /></>}
           </button>
           {status && <p className="form-feedback" role="status">{status}</p>}
         </form>
@@ -178,7 +214,7 @@ export default function AuthPage({ mode }) {
               </span>
             </>
           )}
-          {mode === 'recovery' && <Link to="/entrar">Voltar a iniciar sessão</Link>}
+          {(mode === 'recovery' || mode === 'reset') && <Link to="/entrar">Voltar a iniciar sessão</Link>}
         </div>
         <Link className="auth-card__back" to="/"><ArrowLeft size={15} /> Voltar à página inicial</Link>
       </div>

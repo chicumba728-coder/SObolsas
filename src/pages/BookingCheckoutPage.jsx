@@ -1,22 +1,34 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useRouter } from '../router.jsx';
-import { DemoNote, EmptyState, Field, Notice, PageHeading, SectionCard, SelectField, TextAreaField } from '../components/ui.jsx';
+import { DemoNote, EmptyState, ErrorState, Field, LoadingState, Notice, PageHeading, SectionCard, SelectField, TextAreaField } from '../components/ui.jsx';
 import { ArrowLeft, Lock } from '../components/icons.jsx';
-import { addRecord, useCollection } from '../data/store.js';
+import { mutate, useList } from '../data/store.js';
 import { formatDate, todayISO } from '../data/status.js';
+import { useSession } from '../session.jsx';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function BookingPage() {
   const { search } = useRouter();
-  const mentors = useCollection('mentors').filter((m) => m.status === 'approved');
-  const bookings = useCollection('bookings');
+  const { user, role } = useSession();
+  const { items: mentors, loading, error: loadError, reload } = useList('/mentors');
   const presetMentor = new URLSearchParams(search).get('mentor') || '';
-  const [values, setValues] = useState({
-    mentorId: '', date: '', time: '', studentName: '', studentEmail: '', topic: '',
+  const isStudent = role === 'student';
+  const emptyValues = () => ({
+    mentorId: '', date: '', time: '',
+    studentName: isStudent ? user.name : '', studentEmail: isStudent ? user.email : '', topic: '',
   });
+  const [values, setValues] = useState(emptyValues);
   const [errors, setErrors] = useState({});
+  const [formError, setFormError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(null);
+
+  // A sessão pode chegar depois do primeiro render (recarga da página): preenche nome e email.
+  useEffect(() => {
+    if (!isStudent) return;
+    setValues((prev) => ({ ...prev, studentName: prev.studentName || user.name, studentEmail: prev.studentEmail || user.email }));
+  }, [isStudent, user]);
 
   // Pré-seleciona o mentor vindo do perfil (?mentor=ID), se continuar aprovado.
   const mentorId = values.mentorId || (mentors.some((m) => m.id === presetMentor) ? presetMentor : '');
@@ -26,8 +38,17 @@ export function BookingPage() {
     setErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
   };
 
-  const handleSubmit = (event) => {
+  const order = ['mentorId', 'date', 'time', 'studentName', 'studentEmail'];
+  const showErrors = (next) => {
+    setErrors(next);
+    const first = order.find((field) => next[field]);
+    if (first) document.getElementById(`booking-${first}`)?.focus();
+    return Boolean(first);
+  };
+
+  const handleSubmit = async (event) => {
     event.preventDefault();
+    if (submitting) return;
     const clean = {
       mentorId,
       date: values.date,
@@ -44,18 +65,18 @@ export function BookingPage() {
     if (!clean.studentName) next.studentName = 'Indique o seu nome.';
     if (!clean.studentEmail) next.studentEmail = 'Indique o endereço de email.';
     else if (!EMAIL_RE.test(clean.studentEmail)) next.studentEmail = 'Introduza um endereço de email válido.';
-    if (!next.time && !next.date && clean.mentorId) {
-      const clash = bookings.some((b) => b.mentorId === clean.mentorId && b.date === clean.date && b.time === clean.time && b.status !== 'cancelled');
-      if (clash) next.time = 'Este horário já tem um pedido. Escolha outro.';
-    }
-    setErrors(next);
-    const order = ['mentorId', 'date', 'time', 'studentName', 'studentEmail'];
-    const first = order.find((field) => next[field]);
-    if (first) { document.getElementById(`booking-${first}`)?.focus(); return; }
+    if (showErrors(next)) return;
 
-    const mentor = mentors.find((m) => m.id === clean.mentorId);
-    addRecord('bookings', { ...clean, mentorName: mentor?.name || '', status: 'pending', source: 'public' });
-    setDone({ mentorName: mentor?.name || '', date: clean.date, time: clean.time });
+    setSubmitting(true);
+    setFormError('');
+    try {
+      const booking = await mutate('POST', '/bookings', clean);
+      setDone({ mentorName: booking.mentorName, date: booking.date, time: booking.time });
+    } catch (error) {
+      if (!showErrors(error.fields || {})) setFormError(error.message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (done) {
@@ -63,12 +84,14 @@ export function BookingPage() {
       <div className="content-wrap content-wrap--narrow page-content">
         <PageHeading title="Pedido registado" />
         <Notice tone="success" title="Pedido de sessão registado">
-          Sessão com {done.mentorName} em {formatDate(done.date)} às {done.time}. Fica pendente até a administração a confirmar.
-          Nesta versão não é enviado email nem cobrado qualquer valor.
+          Sessão com {done.mentorName} em {formatDate(done.date)} às {done.time}. Fica pendente até o mentor ou a administração a confirmar.
+          Nesta versão não é cobrado qualquer valor.
         </Notice>
         <div className="detail-actions">
-          <button className="button button--outline" type="button" onClick={() => { setDone(null); setValues({ mentorId: '', date: '', time: '', studentName: '', studentEmail: '', topic: '' }); }}>Fazer outro pedido</button>
-          <Link className="button button--primary" to="/mentores">Voltar aos mentores</Link>
+          <button className="button button--outline" type="button" onClick={() => { setDone(null); setValues(emptyValues()); }}>Fazer outro pedido</button>
+          {isStudent
+            ? <Link className="button button--primary" to="/estudante/mentorias">Ver as minhas mentorias</Link>
+            : <Link className="button button--primary" to="/mentores">Voltar aos mentores</Link>}
         </div>
       </div>
     );
@@ -77,8 +100,16 @@ export function BookingPage() {
   return (
     <div className="content-wrap content-wrap--narrow page-content">
       <PageHeading title="Agendamento" description="Escolha um mentor, uma data e um horário para pedir uma sessão de mentoria." />
-      <SectionCard title="Pedir sessão" description="O pedido fica pendente até ser confirmado pela administração.">
-        {mentors.length === 0 ? (
+      <SectionCard title="Pedir sessão" description="O pedido fica pendente até ser confirmado.">
+        {!user && (
+          <Notice>
+            Pode pedir sem conta, mas para acompanhar as suas sessões <Link to="/entrar/estudante?voltar=%2Fagendar">entre como estudante</Link>.
+          </Notice>
+        )}
+        {formError && <Notice tone="error">{formError}</Notice>}
+        {loading ? <LoadingState /> : loadError ? (
+          <ErrorState description={loadError.message} action={<button type="button" className="button button--outline" onClick={reload}>Tentar novamente</button>} />
+        ) : mentors.length === 0 ? (
           <EmptyState
             compact
             title="Ainda não há mentores disponíveis"
@@ -112,7 +143,7 @@ export function BookingPage() {
               </div>
             </fieldset>
             <div className="form-actions">
-              <button className="button button--primary" type="submit">Enviar pedido</button>
+              <button className="button button--primary" type="submit" disabled={submitting}>{submitting ? 'A enviar…' : 'Enviar pedido'}</button>
             </div>
           </form>
         )}

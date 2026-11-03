@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useRouter } from '../router.jsx';
-import { EmptyState, PageHeading, SearchField, SelectField } from '../components/ui.jsx';
+import { EmptyState, ErrorState, LoadingState, Notice, PageHeading, SearchField, SelectField } from '../components/ui.jsx';
 import { ArrowLeft, ArrowRight, ArrowUpRight } from '../components/icons.jsx';
-import { useCollection } from '../data/store.js';
+import { mutate, useList, useResource } from '../data/store.js';
+import { useSession } from '../session.jsx';
 import { formatDate, isDeadlineOpen } from '../data/status.js';
 
 const deadlineFilters = [
@@ -19,9 +20,91 @@ function DeadlineBadge({ deadline }) {
     : <span className="status-badge status-badge--muted">Prazo encerrado</span>;
 }
 
+// Ações do estudante sobre uma bolsa: guardar e acompanhar a candidatura.
+function StudentActions({ scholarship }) {
+  const { user, role } = useSession();
+  const { pathname } = useRouter();
+  const isStudent = role === 'student';
+  const { items: saved } = useList('/me/saved', { enabled: isStudent });
+  const { items: applications } = useList('/me/applications', { enabled: isStudent });
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+
+  if (!user) {
+    return (
+      <p className="detail-hint">
+        <Link className="text-link" to={`/entrar/estudante?voltar=${encodeURIComponent(pathname)}`}>Entre como estudante</Link> para guardar esta bolsa e acompanhar a candidatura.
+      </p>
+    );
+  }
+  if (!isStudent) return null;
+
+  const isSaved = saved.some((s) => s.id === scholarship.id);
+  const application = applications.find((a) => a.scholarshipId === scholarship.id);
+
+  const run = async (action, success) => {
+    setBusy(true);
+    setFeedback(null);
+    try {
+      await action();
+      setFeedback({ tone: 'success', text: success });
+    } catch (error) {
+      setFeedback({ tone: 'error', text: Object.values(error.fields || {})[0] || error.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="detail-actions">
+        <button
+          type="button"
+          className="button button--outline"
+          disabled={busy}
+          aria-pressed={isSaved}
+          onClick={() => run(
+            () => mutate(isSaved ? 'DELETE' : 'PUT', `/me/saved/${scholarship.id}`),
+            isSaved ? 'Bolsa removida das guardadas.' : 'Bolsa guardada.',
+          )}
+        >
+          {isSaved ? 'Remover das guardadas' : 'Guardar bolsa'}
+        </button>
+        {application ? (
+          <Link className="button button--text" to="/estudante/candidaturas">Ver candidatura <ArrowRight size={15} /></Link>
+        ) : (
+          <button
+            type="button"
+            className="button button--text"
+            disabled={busy}
+            onClick={() => run(
+              () => mutate('POST', '/me/applications', { scholarshipId: scholarship.id }),
+              'Candidatura adicionada ao seu acompanhamento.',
+            )}
+          >
+            Acompanhar candidatura
+          </button>
+        )}
+      </div>
+      {feedback && <Notice tone={feedback.tone}>{feedback.text}</Notice>}
+    </>
+  );
+}
+
 function ScholarshipDetail({ id }) {
-  const scholarships = useCollection('scholarships');
-  const item = scholarships.find((r) => r.id === id && r.status === 'published');
+  const { data: item, loading, error, reload } = useResource(`/scholarships/${encodeURIComponent(id)}`);
+  const notFound = error?.status === 404;
+
+  if (loading) {
+    return <div className="content-wrap content-wrap--narrow page-content"><LoadingState /></div>;
+  }
+  if (error && !notFound) {
+    return (
+      <div className="content-wrap content-wrap--narrow page-content">
+        <ErrorState description={error.message} action={<button type="button" className="button button--outline" onClick={reload}>Tentar novamente</button>} />
+      </div>
+    );
+  }
 
   return (
     <div className="content-wrap content-wrap--narrow page-content detail-page">
@@ -55,6 +138,7 @@ function ScholarshipDetail({ id }) {
             )}
             <Link className="button button--outline" to="/mentores">Pedir ajuda a um mentor</Link>
           </div>
+          <StudentActions scholarship={item} />
         </>
       )}
     </div>
@@ -67,7 +151,7 @@ export default function ScholarshipsPage({ detailId }) {
   const applied = params.get('pesquisa') || '';
   const prazo = deadlineFilters.some((f) => f.value === params.get('prazo')) ? params.get('prazo') : '';
   const [query, setQuery] = useState(applied);
-  const scholarships = useCollection('scholarships');
+  const { items: scholarships, loading, error, reload } = useList('/scholarships', { enabled: !detailId });
 
   useEffect(() => {
     setQuery(new URLSearchParams(search).get('pesquisa') || '');
@@ -75,7 +159,7 @@ export default function ScholarshipsPage({ detailId }) {
 
   if (detailId) return <ScholarshipDetail id={detailId} />;
 
-  const published = scholarships.filter((r) => r.status === 'published');
+  const published = scholarships;
   const term = applied.toLowerCase();
   const results = published.filter((r) => {
     if (term && ![r.title, r.provider, r.description].some((value) => (value || '').toLowerCase().includes(term))) return false;
@@ -124,7 +208,9 @@ export default function ScholarshipsPage({ detailId }) {
           {results.length === 0 ? 'Nenhuma encontrada' : `${results.length} oportunidade${results.length === 1 ? '' : 's'}`}
         </span>
       </div>
-      {results.length === 0 ? (
+      {loading ? <LoadingState /> : error ? (
+        <ErrorState description={error.message} action={<button type="button" className="button button--outline" onClick={reload}>Tentar novamente</button>} />
+      ) : results.length === 0 ? (
         <EmptyState
           title={filtered ? 'Nenhuma oportunidade corresponde à pesquisa' : 'Ainda não há bolsas publicadas'}
           description={filtered
