@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 export const routes = [
   { path: '/', title: 'Início', key: 'home' },
@@ -12,6 +12,7 @@ export const routes = [
   { path: '/registar/estudante', title: 'Criar conta de estudante', key: 'register-student' },
   { path: '/registar/mentor', title: 'Criar conta de mentor', key: 'register-mentor' },
   { path: '/recuperar-palavra-passe', title: 'Recuperar palavra-passe', key: 'recovery' },
+  { path: '/redefinir-palavra-passe', title: 'Definir nova palavra-passe', key: 'reset' },
   { path: '/estudante', title: 'Área do estudante', key: 'student-home' },
   { path: '/estudante/perfil', title: 'Perfil do estudante', key: 'student-profile' },
   { path: '/estudante/bolsas-guardadas', title: 'Bolsas guardadas', key: 'student-saved' },
@@ -73,13 +74,13 @@ export function RouterProvider({ children }) {
     return () => window.removeEventListener('popstate', syncLocation);
   }, []);
 
-  const navigate = (to, options = {}) => {
+  const navigate = useCallback((to, options = {}) => {
     const url = new URL(to, window.location.origin);
     if (options.replace) window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
     else window.history.pushState({}, '', `${url.pathname}${url.search}${url.hash}`);
     setLocation({ pathname: url.pathname, search: url.search });
     window.scrollTo({ top: 0, behavior: 'instant' });
-  };
+  }, []);
 
   const isFirstRender = useRef(true);
   useEffect(() => {
@@ -90,7 +91,7 @@ export function RouterProvider({ children }) {
     main.focus({ preventScroll: true });
   }, [location.pathname, location.search]);
 
-  const value = useMemo(() => ({ ...location, ...matchRoute(location.pathname), navigate }), [location]);
+  const value = useMemo(() => ({ ...location, ...matchRoute(location.pathname), navigate }), [location, navigate]);
   return <RouterContext.Provider value={value}>{children}</RouterContext.Provider>;
 }
 

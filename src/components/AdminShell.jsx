@@ -24,7 +24,7 @@ export default function AdminShell({ children }) {
               <button
                 className="button button--small button--text"
                 type="button"
-                onClick={() => { signOut(); navigate('/admin/entrar', { replace: true }); }}
+                onClick={async () => { await signOut(); navigate('/admin/entrar', { replace: true }); }}
               >
                 Sair
               </button>

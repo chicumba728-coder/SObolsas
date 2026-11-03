@@ -27,7 +27,7 @@ export default function Header() {
   const [open, setOpen] = useState(false);
   const [areasOpen, setAreasOpen] = useState(false);
   const { pathname, navigate } = useRouter();
-  const { role, signOut } = useSession();
+  const { user, role, signOut, canAccess } = useSession();
   const headerRef = useRef(null);
   const dropdownRef = useRef(null);
   const areasTriggerRef = useRef(null);
@@ -63,7 +63,8 @@ export default function Header() {
   }, [areasOpen, open]);
 
   // A administração é uma área isolada: não aparece na navegação pública.
-  const areas = [roles.student, roles.mentor];
+  // Com sessão, mostra só as áreas a que a conta tem acesso.
+  const areas = [roles.student, roles.mentor].filter((area) => !user || canAccess(area.key));
   const currentArea = role ? roles[role] : null;
   const onArea = pathname.startsWith('/estudante') || pathname.startsWith('/mentor/') || pathname === '/mentor';
 
@@ -108,7 +109,7 @@ export default function Header() {
                     onClick={close}
                   >
                     {area.key === 'admin' ? area.label : `Área do ${area.label.toLowerCase()}`}
-                    {role === area.key && <span className="nav-dropdown__badge">sessão</span>}
+                    {user && canAccess(area.key) && <span className="nav-dropdown__badge">sessão</span>}
                   </Link>
                 ))}
               </div>
@@ -116,9 +117,9 @@ export default function Header() {
           </div>
           {currentArea ? (
             <div className="nav-session">
-              <span className="nav-session__role">{currentArea.label}</span>
+              <span className="nav-session__role" title={user.email}>{user.name}</span>
               <Link to={currentArea.area} className="button button--small button--outline" onClick={close}>Abrir área</Link>
-              <button className="button button--small button--text" type="button" onClick={() => { signOut(); close(); navigate('/'); }}>
+              <button className="button button--small button--text" type="button" onClick={async () => { close(); await signOut(); navigate('/'); }}>
                 Sair <Close size={15} />
               </button>
             </div>

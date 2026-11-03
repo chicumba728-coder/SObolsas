@@ -17,10 +17,6 @@
 .admin-form { margin-bottom: var(--space-4); }
 .admin-console__bar .button { margin-left: auto; }
 
-.admin-reset { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: var(--space-5); padding: 14px 16px; border: 1px dashed var(--border-strong); border-radius: var(--radius-2); color: var(--text-muted); font-size: 0.85rem; }
-.admin-reset p { margin: 0; }
-.admin-reset__confirm { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; font-weight: 600; }
-
 .filter-row { max-width: 280px; margin-bottom: var(--space-5); }
 
 .result-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
@@ -38,6 +34,24 @@ a.result-card__title:hover { color: var(--blue-strong); }
 .detail-facts dd { margin: 0; display: inline-flex; align-items: center; gap: 8px; }
 .detail-text p { margin: 0 0 12px; line-height: 1.65; }
 .detail-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: var(--space-5); }
+
+/* Listas das áreas de estudante e mentor */
+.record-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.record-list__item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-2); background: var(--white); }
+.record-list__item--stacked { flex-direction: column; align-items: stretch; }
+.record-list__main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.record-list__title { color: var(--navy); font-weight: 650; overflow-wrap: anywhere; }
+a.record-list__title:hover { color: var(--blue-strong); }
+.record-list__meta { color: var(--text-muted); font-size: 0.86rem; overflow-wrap: anywhere; }
+.record-list__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.inline-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin-bottom: var(--space-4); }
+.inline-form .form-field { flex: 1 1 260px; margin: 0; }
+.tracker-column__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 0.86rem; }
+.tracker-column__list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; }
+.muted-text { color: var(--text-soft); font-size: 0.8rem; }
+.detail-hint { margin-top: var(--space-4); color: var(--text-muted); font-size: 0.9rem; }
+.section-card + .section-card { margin-top: var(--space-5); }
+.notice + .form-grid, .notice + .record-list, .notice + .inline-form { margin-top: var(--space-4); }
 
 @media (max-width: 800px) {
   .admin-console__bar .button { margin-left: 0; width: 100%; }

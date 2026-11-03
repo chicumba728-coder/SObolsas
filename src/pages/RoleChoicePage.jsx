@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from '../router.jsx';
-import { DemoNote, PageHeading } from '../components/ui.jsx';
+import { PageHeading } from '../components/ui.jsx';
 import { ArrowRight } from '../components/icons.jsx';
 
 const options = [
@@ -23,7 +23,6 @@ export default function RoleChoicePage() {
         title="Entrar"
         description="As áreas de estudante e de mentor são separadas. Escolha por onde quer entrar."
       />
-      <DemoNote>A entrada não verifica credenciais nem guarda sessão. Serve apenas para abrir a área escolhida.</DemoNote>
       <ul className="role-choice__grid">
         {options.map((option) => (
           <li key={option.to}>

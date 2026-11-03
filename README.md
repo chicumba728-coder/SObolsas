@@ -1,48 +1,64 @@
 # SObolsas
 
-# Bolsaria — frontend
+# Bolsaria
 
-Frontend responsivo em React e JavaScript, com CSS puro. A aplicação não inclui servidor, base de dados, autenticação, armazenamento ou processamento de pagamentos.
+Plataforma de bolsas de estudo e mentorias: frontend em React (CSS puro) e API em Node.js (Express) com base de dados SQLite.
 
 ## Executar
 
-Requisitos: Node.js e pnpm compatíveis com a versão declarada em `package.json`.
+Requisitos: Node.js 22.13 ou superior (usa o módulo `node:sqlite` nativo) e pnpm (versão em `package.json`; `corepack enable` instala-a).
 
 ```sh
 pnpm install
-pnpm dev
+cp .env.example .env   # preencha ADMIN_EMAIL e ADMIN_PASSWORD
+pnpm dev               # API em :3001 + frontend em :3000 (o Vite encaminha /api)
 ```
 
-O servidor de desenvolvimento usa a porta 3000. Para gerar os ficheiros estáticos:
+Abra http://localhost:3000. O primeiro administrador é criado no arranque a partir do `.env` (só se ainda não existir nenhum). Entra em `/admin/entrar`.
 
-```sh
-pnpm build
+| Comando | O que faz |
+| --- | --- |
+| `pnpm dev` | API + frontend em modo de desenvolvimento |
+| `pnpm test` | testes da API (`server/*.test.js`, base de dados em memória) |
+| `pnpm build` | compila o frontend para `dist/` |
+| `pnpm start` | produção: a API serve também o `dist/` com fallback de SPA (porta `PORT`, por omissão 3001) |
+
+## Arquitetura
+
+```text
+server/
+  index.js        arranque, criação do primeiro admin
+  app.js          Express: /api, proteção CSRF (só JSON), erros, ficheiros estáticos em produção
+  db.js           SQLite: ligação e esquema (criado automaticamente)
+  security.js     palavras-passe (scrypt), tokens de sessão, cookies, limite de tentativas
+  validation.js   validação dos pedidos
+  routes/         auth, public, me (estudante/mentor), admin
+src/
+  data/api.js     cliente HTTP
+  data/store.js   useResource / useList / mutate (cache partilhada; recarrega após alterações)
+  session.jsx     sessão do utilizador (GET /api/auth/me) e regras de acesso por área
 ```
 
-## Áreas e papéis (MVP)
+Os dados ficam em `server/data/bolsaria.db` (fora do Git). Para recomeçar do zero, pare o servidor e apague esse ficheiro.
 
-- **Público** (`/`, `/bolsas`, `/mentores`, `/agendar`): qualquer visitante pesquisa e filtra bolsas, vê detalhes de bolsas e perfis de mentores e pede uma sessão. Só aparecem bolsas **publicadas** e mentores **aprovados**; o email dos mentores nunca é público.
-- **Estudante** (`/estudante`) e **Mentor** (`/mentor`): áreas separadas, com entrada própria (`/entrar/estudante`, `/entrar/mentor`).
-- **Administração** (`/admin`): área **isolada** do site público, com layout próprio (sem menu nem rodapé públicos), fora da navegação pública e protegida. Sem sessão de admin, qualquer `/admin/...` redireciona para `/admin/entrar`.
+## Autenticação e acesso
 
-### Operações do administrador
+- Sessão por cookie `httpOnly` (`SameSite=Lax`, `Secure` em produção), válida 14 dias; o servidor guarda apenas o hash do token.
+- Palavras-passe com scrypt e sal; mínimo de 8 caracteres. Login e recuperação têm limite de tentativas.
+- **Estudante** (`/estudante`): contas `student`. **Mentor** (`/mentor`): contas `mentor` ou estudantes que se candidataram a mentor. **Administração** (`/admin`): contas `admin`. Sem sessão, as áreas redirecionam para a página de entrada e voltam depois do login.
+- Suspender uma conta termina as sessões dela.
+- **Recuperação de palavra-passe:** ainda não há serviço de email. A ligação de recuperação (válida 1 hora) é escrita no registo do servidor.
 
-| Área | Rota | Operações |
-| --- | --- | --- |
-| Bolsas | `/admin/bolsas` | criar, editar, publicar/passar a rascunho, eliminar, pesquisar |
-| Utilizadores | `/admin/utilizadores` | criar, editar, suspender/reativar, eliminar (email único) |
-| Mentores | `/admin/mentores` | criar, editar, aprovar/suspender, eliminar (email único) |
-| Reservas | `/admin/reservas` | registar, editar, confirmar/cancelar, eliminar (sem horários repetidos por mentor) |
+## O que cada área faz
 
-Os pedidos de sessão feitos em `/agendar` chegam a `/admin/reservas` como **Pendente**.
+- **Público:** pesquisa de bolsas publicadas e mentores aprovados (o email dos mentores nunca é enviado ao navegador); pedido de sessão em `/agendar` (com ou sem conta; o servidor recusa horários ocupados).
+- **Estudante:** perfil e palavra-passe, bolsas guardadas, acompanhamento de candidaturas (estado e notas), sessões pedidas com a conta, candidatura a mentor.
+- **Mentor:** perfil profissional (fica pendente até aprovação), reservas recebidas com confirmar/cancelar, próximas sessões.
+- **Administração:** CRUD de bolsas, utilizadores (com palavra-passe), mentores (aprovar/suspender) e reservas; resumo com contagens.
 
-## Dados e sessão (sem backend)
+## Ainda não implementado
 
-- **Dados:** `src/data/store.js` guarda as coleções no `localStorage` do navegador. Começam **vazias** (não há dados de exemplo) e só existem nesse navegador. É o único ficheiro a trocar quando houver API/base de dados. No painel há "Repor dados locais".
-- **Sessão:** `src/session.jsx` guarda o papel em `sessionStorage` (sobrevive a recargas, termina ao fechar o separador). Entrada de estudante/mentor continua simulada.
-- **Acesso admin:** código em `src/config/admin.js` (por omissão `bolsaria-admin`; alterar com `VITE_ADMIN_CODE` em `.env.local`, ver `.env.example`). **Não é segurança real**: num frontend o código fica no bundle. Substituir por autenticação no servidor.
-- Checkout (`/checkout`) continua apenas como interface, sem pagamentos.
-
-## Rotas
-
-Declaradas em `src/router.jsx` (History API, sem biblioteca). `isAdminPath` separa a área de admin; `src/App.jsx` aplica layout e guarda de acesso (`AdminRoutes` vs `PublicRoutes`). Em produção, o servidor deve devolver `index.html` para qualquer caminho (fallback de SPA).
+- Envio e armazenamento de documentos do estudante.
+- Serviços, preços e disponibilidade dos mentores; rendimentos.
+- Checkout e pagamentos (`/checkout` é só interface).
+- Envio de emails (recuperação, confirmações).

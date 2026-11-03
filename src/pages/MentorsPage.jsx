@@ -1,15 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useRouter } from '../router.jsx';
-import { EmptyState, PageHeading, SearchField } from '../components/ui.jsx';
+import { EmptyState, ErrorState, LoadingState, PageHeading, SearchField } from '../components/ui.jsx';
 import { ArrowLeft, ArrowRight, ArrowUpRight } from '../components/icons.jsx';
-import { useCollection } from '../data/store.js';
+import { useList, useResource } from '../data/store.js';
 
 const excerpt = (text = '', max = 160) => (text.length > max ? `${text.slice(0, max).trimEnd()}…` : text);
 
 function MentorDetail({ id }) {
-  const mentors = useCollection('mentors');
-  // Só mentores aprovados são públicos. O email nunca é apresentado.
-  const mentor = mentors.find((m) => m.id === id && m.status === 'approved');
+  // Só mentores aprovados são públicos (o servidor filtra). O email nunca é enviado.
+  const { data: mentor, loading, error, reload } = useResource(`/mentors/${encodeURIComponent(id)}`);
+
+  if (loading) return <div className="content-wrap content-wrap--narrow page-content"><LoadingState /></div>;
+  if (error && error.status !== 404) {
+    return (
+      <div className="content-wrap content-wrap--narrow page-content">
+        <ErrorState description={error.message} action={<button type="button" className="button button--outline" onClick={reload}>Tentar novamente</button>} />
+      </div>
+    );
+  }
 
   return (
     <div className="content-wrap content-wrap--narrow page-content detail-page">
@@ -44,7 +52,7 @@ export default function MentorsPage({ detailId }) {
   const { search, navigate } = useRouter();
   const applied = new URLSearchParams(search).get('pesquisa') || '';
   const [query, setQuery] = useState(applied);
-  const mentors = useCollection('mentors');
+  const { items: mentors, loading, error, reload } = useList('/mentors', { enabled: !detailId });
 
   useEffect(() => {
     setQuery(new URLSearchParams(search).get('pesquisa') || '');
@@ -52,7 +60,7 @@ export default function MentorsPage({ detailId }) {
 
   if (detailId) return <MentorDetail id={detailId} />;
 
-  const approved = mentors.filter((m) => m.status === 'approved');
+  const approved = mentors;
   const term = applied.toLowerCase();
   const results = term
     ? approved.filter((m) => [m.name, m.specialty, m.bio].some((value) => (value || '').toLowerCase().includes(term)))
@@ -90,7 +98,9 @@ export default function MentorsPage({ detailId }) {
           {results.length === 0 ? 'Nenhum encontrado' : `${results.length} mentor${results.length === 1 ? '' : 'es'}`}
         </span>
       </div>
-      {results.length === 0 ? (
+      {loading ? <LoadingState /> : error ? (
+        <ErrorState description={error.message} action={<button type="button" className="button button--outline" onClick={reload}>Tentar novamente</button>} />
+      ) : results.length === 0 ? (
         <EmptyState
           title={submitted ? 'Nenhum mentor corresponde à pesquisa' : 'Ainda não há mentores publicados'}
           description={submitted
